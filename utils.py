@@ -471,7 +471,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
         if os.path.exists(old_ckpt):
             os.remove(old_ckpt)
 
-def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None):
+def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None, strict: bool = True):
     output_dir = Path(args.output_dir)
     if args.auto_resume and len(args.resume) == 0:
         import glob
@@ -488,23 +488,24 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
+                args.resume, map_location=args.device, check_hash=True)
         else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
+            checkpoint = torch.load(args.resume, map_location=args.device)
 
-        model_without_ddp.load_state_dict(checkpoint['model'])
+        model_without_ddp.load_state_dict(checkpoint['model'],strict=strict)
         print("Resume checkpoint %s" % args.resume)
         if 'optimizer' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
+            if strict:
+                optimizer.load_state_dict(checkpoint['optimizer'])
             if not isinstance(checkpoint['epoch'], str): # does not support resuming with 'best', 'best-ema'
                 args.start_epoch = checkpoint['epoch'] + 1
             else:
                 assert args.eval, 'Does not support resuming with checkpoint-best'
             if hasattr(args, 'model_ema') and args.model_ema:
                 if 'model_ema' in checkpoint.keys():
-                    model_ema.ema.load_state_dict(checkpoint['model_ema'])
+                    model_ema.ema.load_state_dict(checkpoint['model_ema'],strict)
                 else:
-                    model_ema.ema.load_state_dict(checkpoint['model'])
+                    model_ema.ema.load_state_dict(checkpoint['model'],strict)
             if 'scaler' in checkpoint:
                 loss_scaler.load_state_dict(checkpoint['scaler'])
             print("With optim & sched!")

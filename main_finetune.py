@@ -255,7 +255,7 @@ def main(args):
     )
     
     if args.finetune:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        checkpoint = torch.load(args.finetune, map_location=args.device)
 
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         checkpoint_model = checkpoint['model']
@@ -348,7 +348,7 @@ def main(args):
 
     utils.auto_load_model(
         args=args, model=model, model_without_ddp=model_without_ddp,
-        optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+        optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema, strict=False)
 
     if args.eval:
         print(f"Eval only mode")
