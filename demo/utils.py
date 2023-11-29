@@ -30,7 +30,7 @@ def read_split_data(root: str, val_rate: float = 0.2):
     # 排序，保证个平台顺序一致
     image_label_list.sort()
     # 生成类别名称和id的关系文件
-    json_str = json.dumps(dict((key, val) for key, val in image_label_dict.items()), indent=4)
+    json_str = json.dumps(dict((key, val) for key, val in image_label_dict.items()), indent=4, ensure_ascii=False)
     with open(os.path.join(root, "class_indices.json"), 'w') as json_file:
         json_file.write(json_str)
     # 给label_id维护索引
