@@ -23,6 +23,7 @@ def read_split_data(root: str, val_rate: float = 0.2):
     for line in label_file:
         line = line.strip()
         label_id, label_name = line.split("|")
+        label_id = int(label_id)  # 将label_id转换为整数
         image_label_dict[label_id] = label_name
     label_file.close()
     image_label_list = list(image_label_dict.keys())
@@ -32,6 +33,11 @@ def read_split_data(root: str, val_rate: float = 0.2):
     json_str = json.dumps(dict((key, val) for key, val in image_label_dict.items()), indent=4)
     with open(os.path.join(root, "class_indices.json"), 'w') as json_file:
         json_file.write(json_str)
+    # 给label_id维护索引
+    image_label_id_index_dict = {i: value for i, value in enumerate(image_label_list)}
+    label_id_index_json = json.dumps(dict((key, val) for key, val in image_label_id_index_dict.items()), indent=4)
+    with open(os.path.join(root, "class_indices_index.json"), 'w') as label_id_index_json_file:
+        label_id_index_json_file.write(label_id_index_json)
 
     train_images_path = []  # 存储训练集的所有图片路径
     train_images_label = []  # 存储训练集图片对应索引信息
@@ -44,7 +50,10 @@ def read_split_data(root: str, val_rate: float = 0.2):
     for line in image_label_file:
         line = line.strip()
         image_name, label_id = line.split("|")
-        image_label_rela_dist[image_name] = list(map(int, label_id.split()))
+        label_id_list = list(map(int, label_id.split()))
+        # 需要将label_id转成对应的索引
+        label_id_index_list = [index for index, label_id in zip(image_label_id_index_dict.keys(), image_label_id_index_dict.values()) if label_id in label_id_list]
+        image_label_rela_dist[image_name] = label_id_index_list
     image_label_file.close()
 
     # 从文件夹pic中读取所有图片
@@ -135,16 +144,16 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, 
 
     # 在分布式训练中，需要使用all_reduce来合并各个进程的损失和准确度
     # 初始化全局损失和准确度的tensor
-    accu_loss = torch.zeros(1).to(device) # 累计损失
-    accu_num = torch.zeros(1).to(device) # 累计预测正确的样本数
-    sample_num = torch.zeros(1).to(device) #样本数量
+    accu_loss = torch.tensor(0.0).to(device)  # 累计损失
+    accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
+    sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
     optimizer.zero_grad()
 
     data_loader = tqdm(data_loader, file=sys.stdout)
     for step, data in enumerate(data_loader):
         images, labels = data
-        sample_num += images.shape[0]
+        sample_num += torch.tensor(images.shape[0]).to(device)
 
         pred = model(images.to(device))
 
@@ -196,14 +205,14 @@ def evaluate(model, data_loader, device, epoch):
 
     model.eval()
 
-    accu_num = torch.zeros(1).to(device)   # 累计预测正确的样本数
-    accu_loss = torch.zeros(1).to(device)  # 累计损失
-    sample_num = torch.zeros(1).to(device) #样本数量
+    accu_loss = torch.tensor(0.0).to(device)  # 累计损失
+    accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
+    sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
     data_loader = tqdm(data_loader, file=sys.stdout)
     for step, data in enumerate(data_loader):
         images, labels = data
-        sample_num += images.shape[0]
+        sample_num += torch.tensor(images.shape[0]).to(device)
 
         pred = model(images.to(device))
 
@@ -213,6 +222,9 @@ def evaluate(model, data_loader, device, epoch):
 
         loss = loss_function(pred, labels)
         accu_loss += loss
+
+        # 同步操作，确保所有进程都完成了梯度计算
+        dist.barrier()
 
         # 使用all_reduce进行全局求和
         dist.all_reduce(accu_loss)

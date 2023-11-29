@@ -90,7 +90,7 @@ def main(args):
                                              collate_fn=val_dataset.collate_fn)
 
     model = convnextv2.__dict__[args.model](num_classes=args.num_classes).to(device)
-    ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+    ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
         weights_dict = torch.load(args.weights, map_location=device)["model"]
