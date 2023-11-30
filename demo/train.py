@@ -1,6 +1,7 @@
 import os
 import argparse
 import time
+import os.path as osp
 
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
@@ -94,7 +95,8 @@ def main(args):
     ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
     if args.weights != "":
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
-        weights_dict = torch.load(args.weights, map_location=device)["model"]
+        weights_path = args.weights
+        weights_dict = torch.load(weights_path, map_location=device) if osp.splitext(weights_path)[1] == '.pth' else torch.load(weights_path, map_location=device)['model']
         # 删除有关分类类别的权重
         for k in list(weights_dict.keys()):
             if "head" in k:
