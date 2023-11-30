@@ -12,6 +12,8 @@ import torch.distributed as dist
 import torch
 from tqdm import tqdm
 
+from demo import image_to_img_mapping
+
 
 def read_split_data(root: str, val_rate: float = 0.2):
     random.seed(0)  # 保证随机结果可复现
@@ -74,6 +76,8 @@ def read_split_data(root: str, val_rate: float = 0.2):
             continue
         #校验通过的图片
         valid_images.append(image)
+        #将img对象保存到字典中
+        image_to_img_mapping.image_to_img_mapping[image] = img
 
     # 排序，保证各平台顺序一致
     valid_images.sort()
@@ -104,7 +108,6 @@ def read_split_data(root: str, val_rate: float = 0.2):
 def write_pickle(list_info: list, file_name: str):
     with open(file_name, 'wb') as f:
         pickle.dump(list_info, f)
-
 
 def read_pickle(file_name: str) -> list:
     with open(file_name, 'rb') as f:

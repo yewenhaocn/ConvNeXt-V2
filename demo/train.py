@@ -1,5 +1,6 @@
 import os
 import argparse
+import time
 
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
@@ -32,7 +33,7 @@ def main(args):
     if os.path.exists(trained_model) is False:
         os.makedirs(trained_model)
 
-    tb_writer = SummaryWriter()
+    tb_writer = SummaryWriter(args.log_dir)
 
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
@@ -149,7 +150,8 @@ def main(args):
                 'eval_loss': val_loss,
                 'eval_acc': val_acc
             }
-            checkpoint_path = os.path.join(trained_model_dir, f'checkpoint-{epoch + 1}.pth')
+            checkpoint_time = time.strftime('%Y%m%d%H%M')
+            checkpoint_path = os.path.join(trained_model_dir, f'checkpoint-{checkpoint_time}-{epoch + 1}.pth')
             utils.save_on_master(checkpoint,checkpoint_path)
             best_acc = val_acc
 
@@ -165,6 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('--wd', type=float, default=5e-2)
     parser.add_argument('--model', default='convnextv2_base', type=str, metavar='MODEL',
                         help='Name of model to train')
+    parser.add_argument('--log_dir', default='/home/11067428/logs')
     parser.add_argument('--seed', default=0, type=int)
     # 数据集所在根目录
     parser.add_argument('--data-path', type=str,default="")

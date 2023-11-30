@@ -1,6 +1,10 @@
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+
+from demo import image_to_img_mapping
+
+
 class MyDataSet(Dataset):
     """自定义数据集"""
 
@@ -15,8 +19,7 @@ class MyDataSet(Dataset):
 
     def __getitem__(self, item):
         # 加载图像
-        img = Image.open(self.images_path[item]).convert('RGB')
-
+        img = image_to_img_mapping.image_to_img_mapping.get(self.images_path[item], None)
         # label是多个分类，是个list,比如[0,1]
         label = torch.zeros(self.num_classes)
         for idx in self.images_class[item]:
