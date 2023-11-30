@@ -34,7 +34,7 @@ def main(args):
     if os.path.exists(trained_model) is False:
         os.makedirs(trained_model)
 
-    tb_writer = SummaryWriter(args.log_dir)
+    tb_writer = SummaryWriter(log_dir=args.log_dir)
 
     train_images_path, train_images_label, val_images_path, val_images_label = read_split_data(args.data_path)
 
@@ -137,11 +137,12 @@ def main(args):
                                      epoch=epoch)
 
         tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
-        tb_writer.add_scalar(tags[0], train_loss, epoch)
-        tb_writer.add_scalar(tags[1], train_acc, epoch)
-        tb_writer.add_scalar(tags[2], val_loss, epoch)
-        tb_writer.add_scalar(tags[3], val_acc, epoch)
-        tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
+        if utils.is_main_process():
+            tb_writer.add_scalar(tags[0], train_loss, epoch)
+            tb_writer.add_scalar(tags[1], train_acc, epoch)
+            tb_writer.add_scalar(tags[2], val_loss, epoch)
+            tb_writer.add_scalar(tags[3], val_acc, epoch)
+            tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
 
         if best_acc < val_acc:
             # 保存模型参数和优化器状态到文件
@@ -156,6 +157,8 @@ def main(args):
             checkpoint_path = os.path.join(trained_model_dir, f'checkpoint-{checkpoint_time}-{epoch + 1}.pth')
             utils.save_on_master(checkpoint,checkpoint_path)
             best_acc = val_acc
+
+    tb_writer.close()
 
 
 if __name__ == '__main__':
