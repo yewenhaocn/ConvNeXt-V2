@@ -25,6 +25,9 @@ def main(opt):
     assert os.path.exists(class_path), "file: '{}' dose not exist.".format(class_path)
     with open(class_path, "r") as f:
         class_indict = json.load(f)
+    class_id_mapping_indict = {}
+    class_id_mapping_path = opt.class_id_mapping_path
+
     # load image
     clas = []
     pathss = []
@@ -62,6 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', default='convnextv2_base', type=str, metavar='MODEL')
     # 生成分类对应关系的目录
     parser.add_argument('--class_path', type=str, default="")
+    parser.add_argument('--class_id_mapping_path', type=str, default="")
     # 预训练权重路径，如果不想载入就设置为空字符
     parser.add_argument('--weights', type=str, default='')
     # 需要推理的图片目录

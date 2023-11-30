@@ -46,27 +46,20 @@ def read_split_data(root: str, val_rate: float = 0.2):
     val_images_path = []  # 存储验证集的所有图片路径
     val_images_label = []  # 存储验证集图片对应索引信息
 
-    # 从文件new_label_datasets_res_all.txt中获取每个文件对应的类型
-    image_label_file = open(os.path.join(root, "new_label_datasets_res_all.txt"), "r", encoding="utf-8")
-    image_label_rela_dist = {}
-    for line in image_label_file:
-        line = line.strip()
-        image_name, label_id = line.split("|")
-        label_id_list = list(map(int, label_id.split()))
-        # 需要将label_id转成对应的索引
-        label_id_index_list = [index for index, label_id in zip(image_label_id_index_dict.keys(), image_label_id_index_dict.values()) if label_id in label_id_list]
-        image_label_rela_dist[image_name] = label_id_index_list
-    image_label_file.close()
+    # 从文件train_multi_label.txt中获取训练图片对应的类型
+    train_image_label_rela_dist = get_image_label_rela(root, 'train_multi_label.txt', image_label_id_index_dict)
+    # 从文件val_multi_label.txt中获取验证图片对应的类型
+    val_image_label_rela_dist = get_image_label_rela(root, 'val_multi_label.txt', image_label_id_index_dict)
 
     # 从文件夹pic中读取所有图片
     image_path = os.path.join(root, "pic")
-
-    valid_images = []
+    train_valid_images = []
+    val_valid_images = []
     images = [os.path.join(image_path, i) for i in os.listdir(image_path)]
     for image in images:
         image_name = image.split("/")[-1]
         # 过滤掉没有label的图片
-        if image_name not in image_label_rela_dist:
+        if image_name not in train_image_label_rela_dist and image_name not in val_image_label_rela_dist:
             continue
         # 过滤掉有问题的图片
         try:
@@ -75,35 +68,51 @@ def read_split_data(root: str, val_rate: float = 0.2):
             print(f"Cannot identify image file {image}. Skipping...,exception is {e}")
             continue
         #校验通过的图片
-        valid_images.append(image)
         #将img对象保存到字典中
         image_to_img_mapping.image_to_img_mapping[image] = img
+        # 判断图片属于训练图片还是验证图片
+        if image_name in train_image_label_rela_dist:
+            train_valid_images.append(image)
+        else:
+            val_valid_images.append(image)
 
     # 排序，保证各平台顺序一致
-    valid_images.sort()
-    # 按比例随机采样验证样本
-    val_path = random.sample(valid_images, k=int(len(valid_images) * val_rate))
+    train_valid_images.sort()
+    val_valid_images.sort()
 
-    for img_path in valid_images:
-        if img_path in val_path:  # 如果该路径在采样的验证集样本中则存入验证集
-            val_images_path.append(img_path)
-            # 获取改图片对应的分类
-            img_name = img_path.split("/")[-1]
-            val_images_label.append(image_label_rela_dist.get(img_name))
-        else:  # 否则存入训练集
-            train_images_path.append(img_path)
-            # 获取改图片对应的分类
-            img_name = img_path.split("/")[-1]
-            train_images_label.append(image_label_rela_dist.get(img_name))
+    for img_path in train_valid_images:
+        train_images_path.append(img_path)
+        # 获取改图片对应的分类
+        img_name = img_path.split("/")[-1]
+        train_images_label.append(train_image_label_rela_dist.get(img_name))
 
+    for img_path in val_valid_images:
+        val_images_path.append(img_path)
+        # 获取改图片对应的分类
+        img_name = img_path.split("/")[-1]
+        val_images_label.append(val_image_label_rela_dist.get(img_name))
 
-    print("{} images were found in the dataset.".format(len(valid_images)))
     print("{} images for training.".format(len(train_images_path)))
     print("{} images for validation.".format(len(val_images_path)))
     assert len(train_images_path) > 0, "number of training images must greater than 0."
     assert len(val_images_path) > 0, "number of validation images must greater than 0."
     return train_images_path, train_images_label, val_images_path, val_images_label
 
+def get_image_label_rela(root: str, file: str, image_label_id_index_dict: dict):
+    # 从文件file中获取每个文件对应的类型
+    image_label_file = open(os.path.join(root, file), "r", encoding="utf-8")
+    image_label_rela_dist = {}
+    for line in image_label_file:
+        line = line.strip()
+        image_name, label_id = line.split("|")
+        label_id_list = list(map(int, label_id.split()))
+        # 需要将label_id转成对应的索引
+        label_id_index_list = [index for index, label_id in
+                               zip(image_label_id_index_dict.keys(), image_label_id_index_dict.values()) if
+                               label_id in label_id_list]
+        image_label_rela_dist[image_name] = label_id_index_list
+    image_label_file.close()
+    return image_label_rela_dist
 
 def write_pickle(list_info: list, file_name: str):
     with open(file_name, 'wb') as f:
