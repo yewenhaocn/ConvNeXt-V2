@@ -146,7 +146,7 @@ class ConvNeXtV2(nn.Module):
 
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
         self.head = nn.Linear(dims[-1], num_classes)
-
+        self.sigmoid = nn.Sigmoid()  # 添加sigmoid激活函数
         self.apply(self._init_weights)
         self.head.weight.data.mul_(head_init_scale)
         self.head.bias.data.mul_(head_init_scale)
@@ -165,6 +165,7 @@ class ConvNeXtV2(nn.Module):
     def forward(self, x):
         x = self.forward_features(x)
         x = self.head(x)
+        x = self.sigmoid(x)
         return x
 
 def convnextv2_atto(num_classes: int):
