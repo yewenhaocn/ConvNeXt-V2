@@ -12,7 +12,7 @@ import torch.distributed as dist
 import torch
 from tqdm import tqdm
 
-from demo import image_to_img_mapping
+import image_to_img_mapping
 
 
 def read_split_data(root: str, val_rate: float = 0.2):

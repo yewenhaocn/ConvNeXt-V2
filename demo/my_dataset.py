@@ -2,7 +2,7 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
-from demo import image_to_img_mapping
+import image_to_img_mapping
 
 
 class MyDataSet(Dataset):
