@@ -224,7 +224,6 @@ def evaluate(model, data_loader, device, epoch):
 
     model.eval()
 
-    accu_loss = torch.tensor(0.0).to(device)  # 累计损失
     accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
     sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
@@ -234,35 +233,30 @@ def evaluate(model, data_loader, device, epoch):
         sample_num += torch.tensor(images.shape[0]).to(device)
 
         pred = model(images.to(device))
+        probs = torch.sigmoid(pred)  # 手动应用 Sigmoid 函数，将输出转换为概率
 
         labels = labels.to(device).float()
         # labels = torch.repeat_interleave(labels, labels.shape[1], dim=1)
-        accu_num += torch.eq((pred > 0.5).float(), labels).sum()
-
-        loss = loss_function(pred, labels)
-        accu_loss += loss
+        accu_num += torch.eq((probs > 0.5).float(), labels).sum()
 
         # 同步操作，确保所有进程都完成了梯度计算
         dist.barrier()
 
         # 使用all_reduce进行全局求和
-        dist.all_reduce(accu_loss)
         dist.all_reduce(accu_num)
         dist.all_reduce(sample_num)
 
         # 将全局统计信息转换为Python标量，并计算平均值
         world_size = dist.get_world_size()
-        accu_loss = accu_loss.item() / world_size
         accu_num = accu_num.item() / world_size
         sample_num = sample_num.item() / world_size
 
-        data_loader.desc = "[valid epoch {}] loss: {:.3f}, acc: {:.3f}".format(
+        data_loader.desc = "[valid epoch {}] acc: {:.3f}".format(
             epoch,
-            accu_loss / (step + 1),
             accu_num / sample_num
         )
 
-    return accu_loss / (step + 1), accu_num / sample_num
+    return accu_num / sample_num
 
 
 def create_lr_scheduler(optimizer,

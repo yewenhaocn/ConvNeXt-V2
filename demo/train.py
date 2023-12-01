@@ -131,18 +131,17 @@ def main(args):
                                                 args=args)
 
         # validate
-        val_loss, val_acc = evaluate(model=ddp_model,
+        val_acc = evaluate(model=ddp_model,
                                      data_loader=val_loader,
                                      device=device,
                                      epoch=epoch)
 
-        tags = ["train_loss", "train_acc", "val_loss", "val_acc", "learning_rate"]
+        tags = ["train_loss", "train_acc", "val_acc", "learning_rate"]
         if utils.is_main_process():
             tb_writer.add_scalar(tags[0], train_loss, epoch)
             tb_writer.add_scalar(tags[1], train_acc, epoch)
-            tb_writer.add_scalar(tags[2], val_loss, epoch)
-            tb_writer.add_scalar(tags[3], val_acc, epoch)
-            tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
+            tb_writer.add_scalar(tags[2], val_acc, epoch)
+            tb_writer.add_scalar(tags[3], optimizer.param_groups[0]["lr"], epoch)
 
         if best_acc < val_acc:
             # 保存模型参数和优化器状态到文件
@@ -150,7 +149,6 @@ def main(args):
                 'epoch': epoch + 1,
                 'model_state_dict': ddp_model.module.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'eval_loss': val_loss,
                 'eval_acc': val_acc
             }
             checkpoint_time = time.strftime('%Y%m%d%H%M')
