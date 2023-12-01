@@ -34,5 +34,8 @@ class MyDataSet(Dataset):
     def collate_fn(batch):
         images, labels = tuple(zip(*batch))
         images = torch.stack(images, dim=0)
-        labels = torch.stack(labels, dim=0)
+        labels = torch.stack(labels, dim=0)  # 将标签堆叠在一起
+        #num_classes = labels[0].shape[0]
+        #labels = [[1 if i in label else 0 for i in range(num_classes)] for label in labels]
+        #labels = torch.as_tensor(labels)
         return images, labels
