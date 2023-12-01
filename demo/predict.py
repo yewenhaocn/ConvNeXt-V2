@@ -60,7 +60,7 @@ def main(opt):
             indices_values = dict(filter(lambda x: x[1] > threshold, enumerate(softmax_output)))
             idxs = (softmax_output > threshold).nonzero().flatten()
 
-        clas.append(",".join([class_indict[str(idx.item())][:-1] for idx in idxs]))
+        #clas.append(",".join([class_indict[str(idx.item())][:-1] for idx in idxs]))
     c={"a" : pathss,"b" : clas}#将列表a，b转换成字典
     data=DataFrame(c)#将字典转换成为数据框
     data.to_csv(opt.output_path,sep=',',index=False,header=False)

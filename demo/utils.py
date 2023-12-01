@@ -152,13 +152,18 @@ def save_on_master(*args, **kwargs):
 def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, args=None):
     data_loader.sampler.set_epoch(epoch)
     model.train()
-    loss_function = torch.nn.MultiLabelSoftMarginLoss()
+    loss_function = torch.nn.BCEWithLogitsLoss()
 
     # 在分布式训练中，需要使用all_reduce来合并各个进程的损失和准确度
     # 初始化全局损失和准确度的tensor
     accu_loss = torch.tensor(0.0).to(device)  # 累计损失
     accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
     sample_num = torch.tensor(0.0).to(device)  # 样本数量
+
+    if is_dist_avail_and_initialized:  # 确保在分布式环境中
+        world_size = dist.get_world_size()
+    else:
+        world_size = 1
 
     optimizer.zero_grad()
 
@@ -170,6 +175,8 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, 
         pred = model(images.to(device))
 
         labels = labels.to(device).float()
+        # 对标签进行二值化处理（假设标签是0或1）
+        labels = (labels >= 0.5).float()
         # labels = torch.repeat_interleave(labels, labels.shape[1], dim=1)
         accu_num += torch.eq((pred > 0.5).float(), labels).sum()
 
@@ -186,9 +193,9 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, 
         dist.all_reduce(sample_num)
 
         # 将全局统计信息转换为Python标量，并计算平均值
-        accu_loss = accu_loss.item() / dist.get_world_size()
-        accu_num = accu_num.item() / dist.get_world_size()
-        sample_num = sample_num.item() / dist.get_world_size()
+        accu_loss = accu_loss.item() / world_size
+        accu_num = accu_num.item() / world_size
+        sample_num = sample_num.item() / world_size
 
         data_loader.desc = "[train epoch {}] loss: {:.3f}, acc: {:.3f}, lr: {:.5f}".format(
             epoch,
@@ -213,7 +220,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, 
 @torch.no_grad()
 def evaluate(model, data_loader, device, epoch):
     data_loader.sampler.set_epoch(epoch)
-    loss_function = torch.nn.MultiLabelSoftMarginLoss()
+    loss_function = torch.nn.BCEWithLogitsLoss()
 
     model.eval()
 
