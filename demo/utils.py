@@ -298,11 +298,6 @@ def evaluate(model, data_loader, device, epoch, args):
     losses = AverageMeter('Loss', ':5.3f')
     mem = AverageMeter('Mem', ':.0f', val_only=True)
 
-    progress = ProgressMeter(
-        len(data_loader),
-        [batch_time, losses, mem],
-        prefix='Test: ')
-
     data_loader = tqdm(data_loader, file=sys.stdout)
     with torch.no_grad():
         end = time.time()
@@ -329,9 +324,6 @@ def evaluate(model, data_loader, device, epoch, args):
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
-
-            if step % args.print_freq == 0 and dist.get_rank() == 0:
-                progress.display(step)
 
             # 同步操作，确保所有进程都完成了梯度计算
             dist.barrier()
@@ -368,14 +360,12 @@ def evaluate(model, data_loader, device, epoch, args):
             dist.barrier()
 
         if is_main_process():
-            print("Calculating mAP:")
             filenamelist = ['saved_data_tmp.{}.txt'.format(ii) for ii in range(dist.get_world_size())]
             metric_func = voc_mAP
-            mAP, aps = metric_func([os.path.join(output, _filename) for _filename in filenamelist], num_classes,
+            mAP, _ = metric_func([os.path.join(output, _filename) for _filename in filenamelist], num_classes,
                                    return_each=True)
 
-            print("  mAP: {}".format(mAP))
-            print("   aps: {}".format(np.array2string(aps, precision=5)))
+            print("mAP: {}".format(mAP))
         else:
             mAP = 0
 

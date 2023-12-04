@@ -181,7 +181,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default='')
     # val保存结果路径
     parser.add_argument('--val_output', type=str, default='')
-    parser.add_argument('--print_freq', type=int, default=64)
+    parser.add_argument('--print_freq', type=int, default=1)
     # 是否冻结head以外所有权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
     parser.add_argument('--trained-model', type=str,default="")
