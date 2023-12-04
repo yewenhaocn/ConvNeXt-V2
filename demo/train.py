@@ -97,10 +97,11 @@ def main(args):
         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
         weights_path = args.weights
         weights_dict = torch.load(weights_path, map_location=device)['model_state_dict'] if osp.splitext(weights_path)[1] == '.pth' else torch.load(weights_path, map_location=device)['model']
-        # 删除有关分类类别的权重
-        for k in list(weights_dict.keys()):
-            if "head" in k:
-                del weights_dict[k]
+        if osp.splitext(weights_path)[1] == '.pt':
+            # 删除有关分类类别的权重
+            for k in list(weights_dict.keys()):
+                if "head" in k:
+                    del weights_dict[k]
         print(ddp_model.module.load_state_dict(weights_dict, strict=False))
 
     if args.freeze_layers:
