@@ -279,8 +279,17 @@ def evaluate(model, data_loader, device, epoch, args):
 
     model.eval()
     loss_function = torch.nn.BCEWithLogitsLoss()
+
+    # 初始化全局损失和准确度的tensor
+    accu_loss = torch.tensor(0.0).to(device)  # 累计损失
+    accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
     sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
+    if is_dist_avail_and_initialized:  # 确保在分布式环境中
+        world_size = dist.get_world_size()
+    else:
+        world_size = 1
+        
     #data_loader = tqdm(data_loader, file=sys.stdout)
     # 保存验证结果
     saved_data = []
@@ -293,6 +302,8 @@ def evaluate(model, data_loader, device, epoch, args):
         len(data_loader),
         [batch_time, losses, mem],
         prefix='Test: ')
+
+    data_loader = tqdm(data_loader, file=sys.stdout)
     with torch.no_grad():
         end = time.time()
         for step, data in enumerate(data_loader):
@@ -305,11 +316,12 @@ def evaluate(model, data_loader, device, epoch, args):
                 loss = loss_function(pred, labels)
                 probs = torch.sigmoid(pred)  # 手动应用 Sigmoid 函数，将输出转换为概率
 
-
             # record loss
+            accu_loss += loss
             losses.update(loss.item(), images.size(0))
             mem.update(torch.cuda.max_memory_allocated() / 1024.0 / 1024.0)
 
+            accu_num += torch.eq((pred > 0.5).float(), labels).sum()
 
             _item = torch.cat((probs.detach().cpu(), labels.detach().cpu()), 1)
             saved_data.append(_item)
@@ -320,6 +332,26 @@ def evaluate(model, data_loader, device, epoch, args):
 
             if step % args.print_freq == 0 and dist.get_rank() == 0:
                 progress.display(step)
+
+            # 同步操作，确保所有进程都完成了梯度计算
+            dist.barrier()
+
+            # 使用all_reduce进行全局求和
+            dist.all_reduce(accu_loss)
+            dist.all_reduce(accu_num)
+            dist.all_reduce(sample_num)
+
+            # 将全局统计信息转换为Python标量，并计算平均值
+            world_size = dist.get_world_size()
+            accu_loss = accu_loss.item() / world_size
+            accu_num = accu_num.item() / world_size
+            sample_num = sample_num.item() / world_size
+
+            data_loader.desc = "[valid epoch {}] loss: {:.3f}, acc: {:.3f}".format(
+                epoch,
+                accu_loss / (step + 1),
+                accu_num / sample_num
+            )
 
         if dist.get_world_size() > 1:
             dist.barrier()
