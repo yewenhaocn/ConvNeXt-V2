@@ -33,6 +33,7 @@ def main(opt):
     with open(class_id_mapping_path, 'r') as f:
         class_id_mapping_indict = json.load(f)
 
+    torch.cuda.empty_cache()
     # 加载图片
     clas = []
     pathss = []
@@ -44,7 +45,10 @@ def main(opt):
     for i in tqdm(range(len(paths))):
         img_path = os.path.join(img_dir,paths[i])
         assert os.path.exists(img_path), "file: '{}' dose not exist.".format(img_path)
-        img = Image.open(img_path).convert('RGB')
+        try:
+            img = Image.open(img_path).convert('RGB')
+        except Exception as e:
+            continue
         pathss.append(paths[i])
 
         # [N, C, H, W]
@@ -58,10 +62,20 @@ def main(opt):
             pred = torch.squeeze(model(img.to(device))).cpu()
             output = torch.sigmoid(pred)
             threshold = 0.5
-            indices_values = dict(filter(lambda x: x[1] > threshold, enumerate(output)))
-            idxs = (output > threshold).nonzero().flatten()
+            indices_values = dict(filter(lambda x: x[1] > 0., enumerate(output)))
+            class_info = []
+            for key, value in indices_values.items():
+                # 根据key获取分类id
+                class_id = class_id_mapping_indict[str(key)]
+                # 根据分类id获取分类名称
+                clas_name = class_indict[str(class_id)]
+                rate = value.item()
+                if rate < threshold:
+                    continue
+                class_info.append('{}-{}:{}'.format(class_id,clas_name,f"{rate * 100:.2f}%"))
+            print(class_info)
+        clas.append(class_info)
 
-        #clas.append(",".join([class_indict[str(idx.item())][:-1] for idx in idxs]))
     c={"a" : pathss,"b" : clas}#将列表a，b转换成字典
     data=DataFrame(c)#将字典转换成为数据框
     data.to_csv(opt.output_path,sep=',',index=False,header=False)
