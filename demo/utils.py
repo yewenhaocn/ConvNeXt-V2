@@ -5,9 +5,11 @@ import json
 import pickle
 import random
 import math
+import time
 from PIL import Image
 
 import torch.distributed as dist
+import numpy as np
 
 import torch
 from tqdm import tqdm
@@ -148,6 +150,58 @@ def save_on_master(*args, **kwargs):
     if is_main_process():
         torch.save(*args, **kwargs)
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, name, fmt=':f', val_only=False):
+        self.name = name
+        self.fmt = fmt
+        self.val_only = val_only
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        if self.val_only:
+            fmtstr = '{name} {val' + self.fmt + '}'
+        else:
+            fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+class ProgressMeter(object):
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        print('  '.join(entries))
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+def _meter_reduce(meter):
+    meter_sum = torch.FloatTensor([meter.sum]).cuda()
+    meter_count = torch.FloatTensor([meter.count]).cuda()
+    torch.distributed.reduce(meter_sum, 0)
+    torch.distributed.reduce(meter_count, 0)
+    meter_avg = meter_sum / meter_count
+
+    return meter_avg.item()
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, args=None):
     data_loader.sampler.set_epoch(epoch)
@@ -218,46 +272,137 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler, 
 
 
 @torch.no_grad()
-def evaluate(model, data_loader, device, epoch):
+def evaluate(model, data_loader, device, epoch, args):
     data_loader.sampler.set_epoch(epoch)
-    loss_function = torch.nn.BCEWithLogitsLoss()
+    output = args.val_output
+    num_classes = args.num_classes
 
     model.eval()
-
-    accu_num = torch.tensor(0.0).to(device)  # 累计预测正确的样本数
+    loss_function = torch.nn.BCEWithLogitsLoss()
+    val_mAP = torch.tensor(0.0).to(device)
     sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
-    data_loader = tqdm(data_loader, file=sys.stdout)
-    for step, data in enumerate(data_loader):
-        images, labels = data
-        sample_num += torch.tensor(images.shape[0]).to(device)
+    #data_loader = tqdm(data_loader, file=sys.stdout)
+    # 保存验证结果
+    saved_data = []
 
-        pred = model(images.to(device))
-        probs = torch.sigmoid(pred)  # 手动应用 Sigmoid 函数，将输出转换为概率
+    batch_time = AverageMeter('Time', ':5.3f')
+    losses = AverageMeter('Loss', ':5.3f')
+    mem = AverageMeter('Mem', ':.0f', val_only=True)
 
-        labels = labels.to(device).float()
-        # labels = torch.repeat_interleave(labels, labels.shape[1], dim=1)
-        accu_num += torch.eq((probs > 0.5).float(), labels).sum()
+    progress = ProgressMeter(
+        len(data_loader),
+        [batch_time, losses, mem],
+        prefix='Test: ')
+    with torch.no_grad():
+        end = time.time()
+        for step, data in enumerate(data_loader):
+            images, labels = data
+            sample_num += torch.tensor(images.shape[0]).to(device)
 
-        # 同步操作，确保所有进程都完成了梯度计算
-        dist.barrier()
+            with torch.cuda.amp.autocast():
+                pred = model(images.to(device))
+                labels = labels.to(device).float()
+                loss = loss_function(pred, labels)
+                probs = torch.sigmoid(pred)  # 手动应用 Sigmoid 函数，将输出转换为概率
 
-        # 使用all_reduce进行全局求和
-        dist.all_reduce(accu_num)
-        dist.all_reduce(sample_num)
 
-        # 将全局统计信息转换为Python标量，并计算平均值
-        world_size = dist.get_world_size()
-        accu_num = accu_num.item() / world_size
-        sample_num = sample_num.item() / world_size
+            # record loss
+            losses.update(loss.item(), images.size(0))
+            mem.update(torch.cuda.max_memory_allocated() / 1024.0 / 1024.0)
 
-        data_loader.desc = "[valid epoch {}] acc: {:.3f}".format(
-            epoch,
-            accu_num / sample_num
+
+            _item = torch.cat((probs.detach().cpu(), labels.detach().cpu()), 1)
+            saved_data.append(_item)
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if step % args.print_freq == 0 and dist.get_rank() == 0:
+                progress.display(step)
+
+        if dist.get_world_size() > 1:
+            dist.barrier()
+        loss_avg, = map(
+            _meter_reduce if dist.get_world_size() > 1 else lambda x: x.avg,
+            [losses]
         )
+        print("val_loss: {}".format(loss_avg))
+        # calculate mAP
+        saved_data = torch.cat(saved_data, 0).numpy()
+        saved_name = 'saved_data_tmp.{}.txt'.format(dist.get_rank())
+        np.savetxt(os.path.join(output, saved_name), saved_data)
+        if dist.get_world_size() > 1:
+            dist.barrier()
 
-    return accu_num / sample_num
+        if is_main_process():
+            print("Calculating mAP:")
+            filenamelist = ['saved_data_tmp.{}.txt'.format(ii) for ii in range(dist.get_world_size())]
+            metric_func = voc_mAP
+            mAP, aps = metric_func([os.path.join(output, _filename) for _filename in filenamelist], num_classes,
+                                   return_each=True)
 
+            print("  mAP: {}".format(mAP))
+            print("   aps: {}".format(np.array2string(aps, precision=5)))
+        else:
+            mAP = 0
+
+        if dist.get_world_size() > 1:
+            dist.barrier()
+    return loss_avg,val_mAP
+
+def voc_mAP(imagessetfilelist, num, return_each=False):
+    if isinstance(imagessetfilelist, str):
+        imagessetfilelist = [imagessetfilelist]
+    lines = []
+    for imagessetfile in imagessetfilelist:
+        with open(imagessetfile, 'r') as f:
+            lines.extend(f.readlines())
+
+    seg = np.array([x.strip().split(' ') for x in lines]).astype(float)
+    gt_label = seg[:, num:].astype(np.int32)
+    num_target = np.sum(gt_label, axis=1, keepdims=True)
+
+    sample_num = len(gt_label)
+    class_num = num
+    tp = np.zeros(sample_num)
+    fp = np.zeros(sample_num)
+    aps = []
+
+    for class_id in range(class_num):
+        confidence = seg[:, class_id]
+        sorted_ind = np.argsort(-confidence)
+        sorted_scores = np.sort(-confidence)
+        sorted_label = [gt_label[x][class_id] for x in sorted_ind]
+
+        for i in range(sample_num):
+            tp[i] = (sorted_label[i] > 0)
+            fp[i] = (sorted_label[i] <= 0)
+        true_num = 0
+        true_num = sum(tp)
+        fp = np.cumsum(fp)
+        tp = np.cumsum(tp)
+        rec = tp / float(true_num + 1e-6)
+        prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps + 1e-6)
+        ap = voc_ap(rec, prec, true_num)
+        aps += [ap]
+
+    np.set_printoptions(precision=6, suppress=True)
+    aps = np.array(aps) * 100
+    mAP = np.mean(aps)
+    if return_each:
+        return mAP, aps
+    return mAP
+
+def voc_ap(rec, prec, true_num):
+    mrec = np.concatenate(([0.], rec, [1.]))
+    mpre = np.concatenate(([0.], prec, [0.]))
+    for i in range(mpre.size - 1, 0, -1):
+        mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
+    i = np.where(mrec[1:] != mrec[:-1])[0]
+    ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
+    return ap
 
 def create_lr_scheduler(optimizer,
                         num_step: int,
@@ -378,3 +523,43 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+if __name__ == '__main__':
+    saved_data = []
+    labels = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]],
+                          device='cuda:0')
+    predictions = torch.tensor([[0.3361, 0.2643, 0.2203, 0.4567, 0.4163, 0.5839, 0.2559, 0.2781, 0.5959,
+                           0.3234, 0.2394, 0.6811, 0.4819, 0.5700, 0.3056, 0.4730, 0.2098, 0.5400,
+                           0.3698, 0.2597]], device='cuda:0')
+    _item = torch.cat((predictions.detach().cpu(), labels.detach().cpu()), 1)
+    saved_data.append(_item)
+
+    labels2 = torch.tensor([[1., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]],
+                          device='cuda:0')
+    predictions2 = torch.tensor([[0.6361, 0.2643, 0.5203, 0.4567, 0.4163, 0.5839, 0.2559, 0.2781, 0.5959,
+                                 0.3234, 0.2394, 0.6811, 0.4819, 0.5700, 0.3056, 0.4730, 0.2098, 0.5400,
+                                 0.3698, 0.2597]], device='cuda:0')
+    _item2 = torch.cat((predictions2.detach().cpu(), labels2.detach().cpu()), 1)
+    saved_data.append(_item2)
+    print(saved_data)
+
+    saved_data = torch.cat(saved_data, 0).numpy()
+    saved_name = 'saved_data_tmp.{}.txt'.format(0)
+    np.savetxt(os.path.join('/data/juicefs_sharing_data/11067428/data/val_output', saved_name), saved_data)
+    print("Calculating mAP:")
+    filenamelist = ['saved_data_tmp.{}.txt'.format(ii) for ii in range(1)]
+    metric_func = voc_mAP
+    mAP, aps = metric_func([os.path.join('/data/juicefs_sharing_data/11067428/data/val_output', _filename) for _filename in filenamelist], 20,
+                           return_each=True)
+
+    print("  mAP: {}".format(mAP))
+    print("   aps: {}".format(np.array2string(aps, precision=5)))
+    # aps = [100. , 100. ,100. , 100. , 100. ,100. ,  100. , 100. ,100. ,  100. , 100. ,100. ,  100. , 100. ,100. ,  100. , 100. ,100. ,  100.]
+    # tp = [0., 0., 0., 0., 0., 0., 0., 0.]
+    # true_num = sum(tp)
+    # ap = 0./float(true_num)
+    # aps.append(ap)
+    # mAP = np.mean(aps)
+    # print(aps)
+    # print(map)
+    # print(calculate_map(predictions,labels,labels.shape[1]))

@@ -117,7 +117,7 @@ def main(args):
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
                                        warmup=True, warmup_epochs=1)
 
-    best_acc = 0.
+    best_mAP = 0.
     trained_model_dir = args.trained_model
     os.makedirs(trained_model_dir, exist_ok=True)
     for epoch in range(args.epochs):
@@ -131,30 +131,32 @@ def main(args):
                                                 args=args)
 
         # validate
-        val_acc = evaluate(model=ddp_model,
+        val_loss,val_mAP = evaluate(model=ddp_model,
                                      data_loader=val_loader,
                                      device=device,
-                                     epoch=epoch)
+                                     epoch=epoch,
+                                     args=args)
 
-        tags = ["train_loss", "train_acc", "val_acc", "learning_rate"]
+        tags = ["train_loss", "train_acc", "val_loss", "val_mAP", "learning_rate"]
         if utils.is_main_process():
             tb_writer.add_scalar(tags[0], train_loss, epoch)
             tb_writer.add_scalar(tags[1], train_acc, epoch)
-            tb_writer.add_scalar(tags[2], val_acc, epoch)
-            tb_writer.add_scalar(tags[3], optimizer.param_groups[0]["lr"], epoch)
+            tb_writer.add_scalar(tags[2], val_loss, epoch)
+            tb_writer.add_scalar(tags[3], val_mAP, epoch)
+            tb_writer.add_scalar(tags[4], optimizer.param_groups[0]["lr"], epoch)
 
-        if best_acc < val_acc:
+        if best_mAP < val_mAP:
             # 保存模型参数和优化器状态到文件
             checkpoint = {
                 'epoch': epoch + 1,
                 'model_state_dict': ddp_model.module.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'eval_acc': val_acc
+                'val_mAP': val_mAP
             }
             checkpoint_time = time.strftime('%Y%m%d%H%M')
             checkpoint_path = os.path.join(trained_model_dir, f'checkpoint-{checkpoint_time}-{epoch + 1}.pth')
             utils.save_on_master(checkpoint,checkpoint_path)
-            best_acc = val_acc
+            best_mAP = val_mAP
 
     tb_writer.close()
 
@@ -176,6 +178,9 @@ if __name__ == '__main__':
     parser.add_argument('--data-path', type=str,default="")
     # 预训练权重路径，如果不想载入就设置为空字符
     parser.add_argument('--weights', type=str, default='')
+    # val保存结果路径
+    parser.add_argument('--val_output', type=str, default='')
+    parser.add_argument('--print_freq', type=int, default=64)
     # 是否冻结head以外所有权重
     parser.add_argument('--freeze-layers', type=bool, default=False)
     parser.add_argument('--trained-model', type=str,default="")

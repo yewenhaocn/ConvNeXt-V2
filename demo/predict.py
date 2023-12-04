@@ -54,11 +54,12 @@ def main(opt):
         model.eval()
         with torch.no_grad():
             # predict class
-            output = torch.squeeze(model(img.to(device))).cpu()
+            #output = torch.squeeze(model(img.to(device))).cpu()
+            pred = torch.squeeze(model(img.to(device))).cpu()
+            output = torch.sigmoid(pred)
             threshold = 0.5
-            softmax_output  = torch.sigmoid(output)
-            indices_values = dict(filter(lambda x: x[1] > threshold, enumerate(softmax_output)))
-            idxs = (softmax_output > threshold).nonzero().flatten()
+            indices_values = dict(filter(lambda x: x[1] > threshold, enumerate(output)))
+            idxs = (output > threshold).nonzero().flatten()
 
         #clas.append(",".join([class_indict[str(idx.item())][:-1] for idx in idxs]))
     c={"a" : pathss,"b" : clas}#将列表a，b转换成字典
