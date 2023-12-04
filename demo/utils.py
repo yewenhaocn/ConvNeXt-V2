@@ -279,7 +279,6 @@ def evaluate(model, data_loader, device, epoch, args):
 
     model.eval()
     loss_function = torch.nn.BCEWithLogitsLoss()
-    val_mAP = torch.tensor(0.0).to(device)
     sample_num = torch.tensor(0.0).to(device)  # 样本数量
 
     #data_loader = tqdm(data_loader, file=sys.stdout)
@@ -350,7 +349,7 @@ def evaluate(model, data_loader, device, epoch, args):
 
         if dist.get_world_size() > 1:
             dist.barrier()
-    return loss_avg,val_mAP
+    return loss_avg,mAP
 
 def voc_mAP(imagessetfilelist, num, return_each=False):
     if isinstance(imagessetfilelist, str):
